@@ -125,6 +125,11 @@ typedef struct AVD3D12VAFrame {
  */
 typedef struct AVD3D12VAFramesContext {
     /**
+     * This field is used for resource creation.
+     */
+    D3D12_RESOURCE_FLAGS Flags;
+
+    /**
      * DXGI_FORMAT format. MUST be compatible with the pixel format.
      * If unset, will be automatically set.
      */
