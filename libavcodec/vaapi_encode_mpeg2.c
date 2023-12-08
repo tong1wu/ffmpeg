@@ -166,6 +166,7 @@ fail:
 
 static int vaapi_encode_mpeg2_init_sequence_params(AVCodecContext *avctx)
 {
+    HWBaseEncodeContext           *base_ctx = avctx->priv_data;
     VAAPIEncodeContext                 *ctx = avctx->priv_data;
     VAAPIEncodeMPEG2Context           *priv = avctx->priv_data;
     MPEG2RawSequenceHeader              *sh = &priv->sequence_header;
@@ -281,7 +282,7 @@ static int vaapi_encode_mpeg2_init_sequence_params(AVCodecContext *avctx)
 
     se->bit_rate_extension        = priv->bit_rate >> 18;
     se->vbv_buffer_size_extension = priv->vbv_buffer_size >> 10;
-    se->low_delay                 = ctx->b_per_p == 0;
+    se->low_delay                 = base_ctx->b_per_p == 0;
 
     se->frame_rate_extension_n = ext_n;
     se->frame_rate_extension_d = ext_d;
@@ -353,8 +354,8 @@ static int vaapi_encode_mpeg2_init_sequence_params(AVCodecContext *avctx)
 
 
     *vseq = (VAEncSequenceParameterBufferMPEG2) {
-        .intra_period = ctx->gop_size,
-        .ip_period    = ctx->b_per_p + 1,
+        .intra_period = base_ctx->gop_size,
+        .ip_period    = base_ctx->b_per_p + 1,
 
         .picture_width  = avctx->width,
         .picture_height = avctx->height,
@@ -417,12 +418,12 @@ static int vaapi_encode_mpeg2_init_sequence_params(AVCodecContext *avctx)
 }
 
 static int vaapi_encode_mpeg2_init_picture_params(AVCodecContext *avctx,
-                                                 VAAPIEncodePicture *pic)
+                                                  HWBaseEncodePicture *pic)
 {
     VAAPIEncodeMPEG2Context          *priv = avctx->priv_data;
     MPEG2RawPictureHeader              *ph = &priv->picture_header;
     MPEG2RawPictureCodingExtension    *pce = &priv->picture_coding_extension.data.picture_coding;
-    VAEncPictureParameterBufferMPEG2 *vpic = pic->codec_picture_params;
+    VAEncPictureParameterBufferMPEG2 *vpic = ((VAAPIEncodePicture *)pic)->codec_picture_params;
 
     if (pic->type == PICTURE_TYPE_IDR || pic->type == PICTURE_TYPE_I) {
         ph->temporal_reference  = 0;
@@ -448,8 +449,8 @@ static int vaapi_encode_mpeg2_init_picture_params(AVCodecContext *avctx,
         pce->f_code[1][1] = 15;
     }
 
-    vpic->reconstructed_picture = pic->recon_surface;
-    vpic->coded_buf             = pic->output_buffer;
+    vpic->reconstructed_picture = ((VAAPIEncodePicture *)pic)->recon_surface;
+    vpic->coded_buf             = ((VAAPIEncodePicture *)pic)->output_buffer;
 
     switch (pic->type) {
     case PICTURE_TYPE_IDR:
@@ -458,12 +459,12 @@ static int vaapi_encode_mpeg2_init_picture_params(AVCodecContext *avctx,
         break;
     case PICTURE_TYPE_P:
         vpic->picture_type = VAEncPictureTypePredictive;
-        vpic->forward_reference_picture = pic->refs[0][0]->recon_surface;
+        vpic->forward_reference_picture = ((VAAPIEncodePicture *)pic->refs[0][0])->recon_surface;
         break;
     case PICTURE_TYPE_B:
         vpic->picture_type = VAEncPictureTypeBidirectional;
-        vpic->forward_reference_picture  = pic->refs[0][0]->recon_surface;
-        vpic->backward_reference_picture = pic->refs[1][0]->recon_surface;
+        vpic->forward_reference_picture  = ((VAAPIEncodePicture *)pic->refs[0][0])->recon_surface;
+        vpic->backward_reference_picture = ((VAAPIEncodePicture *)pic->refs[1][0])->recon_surface;
         break;
     default:
         av_assert0(0 && "invalid picture type");
@@ -479,8 +480,8 @@ static int vaapi_encode_mpeg2_init_picture_params(AVCodecContext *avctx,
 }
 
 static int vaapi_encode_mpeg2_init_slice_params(AVCodecContext *avctx,
-                                               VAAPIEncodePicture *pic,
-                                               VAAPIEncodeSlice *slice)
+                                                HWBaseEncodePicture *pic,
+                                                VAAPIEncodeSlice *slice)
 {
     VAAPIEncodeMPEG2Context            *priv = avctx->priv_data;
     VAEncSliceParameterBufferMPEG2   *vslice = slice->codec_slice_params;
@@ -513,6 +514,7 @@ static int vaapi_encode_mpeg2_init_slice_params(AVCodecContext *avctx,
 
 static av_cold int vaapi_encode_mpeg2_configure(AVCodecContext *avctx)
 {
+    HWBaseEncodeContext *base_ctx = avctx->priv_data;
     VAAPIEncodeContext       *ctx = avctx->priv_data;
     VAAPIEncodeMPEG2Context *priv = avctx->priv_data;
     int err;
@@ -522,7 +524,7 @@ static av_cold int vaapi_encode_mpeg2_configure(AVCodecContext *avctx)
         return err;
 
     if (ctx->va_rc_mode == VA_RC_CQP) {
-        priv->quant_p = av_clip(ctx->rc_quality, 1, 31);
+        priv->quant_p = av_clip(base_ctx->rc_quality, 1, 31);
         if (avctx->i_quant_factor > 0.0)
             priv->quant_i =
                 av_clip((avctx->i_quant_factor * priv->quant_p +
@@ -639,8 +641,9 @@ static av_cold int vaapi_encode_mpeg2_close(AVCodecContext *avctx)
 #define OFFSET(x) offsetof(VAAPIEncodeMPEG2Context, x)
 #define FLAGS (AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_ENCODING_PARAM)
 static const AVOption vaapi_encode_mpeg2_options[] = {
+    HW_BASE_ENCODE_COMMON_OPTIONS,
     VAAPI_ENCODE_COMMON_OPTIONS,
-    VAAPI_ENCODE_RC_OPTIONS,
+    HW_BASE_ENCODE_RC_OPTIONS,
 
     { "profile", "Set profile (in profile_and_level_indication)",
       OFFSET(profile), AV_OPT_TYPE_INT,
@@ -694,7 +697,7 @@ const FFCodec ff_mpeg2_vaapi_encoder = {
     .p.id           = AV_CODEC_ID_MPEG2VIDEO,
     .priv_data_size = sizeof(VAAPIEncodeMPEG2Context),
     .init           = &vaapi_encode_mpeg2_init,
-    FF_CODEC_RECEIVE_PACKET_CB(&ff_vaapi_encode_receive_packet),
+    FF_CODEC_RECEIVE_PACKET_CB(&ff_hw_base_encode_receive_packet),
     .close          = &vaapi_encode_mpeg2_close,
     .p.priv_class   = &vaapi_encode_mpeg2_class,
     .p.capabilities = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_HARDWARE |

@@ -52,6 +52,7 @@ typedef struct VAAPIEncodeVP8Context {
 
 static int vaapi_encode_vp8_init_sequence_params(AVCodecContext *avctx)
 {
+    HWBaseEncodeContext         *base_ctx = avctx->priv_data;
     VAAPIEncodeContext               *ctx = avctx->priv_data;
     VAEncSequenceParameterBufferVP8 *vseq = ctx->codec_sequence_params;
 
@@ -66,22 +67,22 @@ static int vaapi_encode_vp8_init_sequence_params(AVCodecContext *avctx)
 
     if (!(ctx->va_rc_mode & VA_RC_CQP)) {
         vseq->bits_per_second = ctx->va_bit_rate;
-        vseq->intra_period    = ctx->gop_size;
+        vseq->intra_period    = base_ctx->gop_size;
     }
 
     return 0;
 }
 
 static int vaapi_encode_vp8_init_picture_params(AVCodecContext *avctx,
-                                                VAAPIEncodePicture *pic)
+                                                HWBaseEncodePicture *pic)
 {
     VAAPIEncodeVP8Context          *priv = avctx->priv_data;
-    VAEncPictureParameterBufferVP8 *vpic = pic->codec_picture_params;
+    VAEncPictureParameterBufferVP8 *vpic = ((VAAPIEncodePicture *)pic)->codec_picture_params;
     int i;
 
-    vpic->reconstructed_frame = pic->recon_surface;
+    vpic->reconstructed_frame = ((VAAPIEncodePicture *)pic)->recon_surface;
 
-    vpic->coded_buf = pic->output_buffer;
+    vpic->coded_buf = ((VAAPIEncodePicture *)pic)->output_buffer;
 
     switch (pic->type) {
     case PICTURE_TYPE_IDR:
@@ -101,7 +102,7 @@ static int vaapi_encode_vp8_init_picture_params(AVCodecContext *avctx,
         vpic->ref_last_frame =
         vpic->ref_gf_frame   =
         vpic->ref_arf_frame  =
-            pic->refs[0][0]->recon_surface;
+            ((VAAPIEncodePicture *)pic->refs[0][0])->recon_surface;
         break;
     default:
         av_assert0(0 && "invalid picture type");
@@ -145,7 +146,7 @@ static int vaapi_encode_vp8_write_quant_table(AVCodecContext *avctx,
 
     memset(&quant, 0, sizeof(quant));
 
-    if (pic->type == PICTURE_TYPE_P)
+    if (pic->base.type == PICTURE_TYPE_P)
         q = priv->q_index_p;
     else
         q = priv->q_index_i;
@@ -161,10 +162,11 @@ static int vaapi_encode_vp8_write_quant_table(AVCodecContext *avctx,
 
 static av_cold int vaapi_encode_vp8_configure(AVCodecContext *avctx)
 {
-    VAAPIEncodeContext     *ctx = avctx->priv_data;
-    VAAPIEncodeVP8Context *priv = avctx->priv_data;
+    HWBaseEncodeContext *base_ctx = avctx->priv_data;
+    VAAPIEncodeContext      *ctx = avctx->priv_data;
+    VAAPIEncodeVP8Context  *priv = avctx->priv_data;
 
-    priv->q_index_p = av_clip(ctx->rc_quality, 0, VP8_MAX_QUANT);
+    priv->q_index_p = av_clip(base_ctx->rc_quality, 0, VP8_MAX_QUANT);
     if (avctx->i_quant_factor > 0.0)
         priv->q_index_i =
             av_clip((avctx->i_quant_factor * priv->q_index_p  +
@@ -216,8 +218,9 @@ static av_cold int vaapi_encode_vp8_init(AVCodecContext *avctx)
 #define OFFSET(x) offsetof(VAAPIEncodeVP8Context, x)
 #define FLAGS (AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_ENCODING_PARAM)
 static const AVOption vaapi_encode_vp8_options[] = {
+    HW_BASE_ENCODE_COMMON_OPTIONS,
     VAAPI_ENCODE_COMMON_OPTIONS,
-    VAAPI_ENCODE_RC_OPTIONS,
+    HW_BASE_ENCODE_RC_OPTIONS,
 
     { "loop_filter_level", "Loop filter level",
       OFFSET(loop_filter_level), AV_OPT_TYPE_INT, { .i64 = 16 }, 0, 63, FLAGS },
@@ -249,7 +252,7 @@ const FFCodec ff_vp8_vaapi_encoder = {
     .p.id           = AV_CODEC_ID_VP8,
     .priv_data_size = sizeof(VAAPIEncodeVP8Context),
     .init           = &vaapi_encode_vp8_init,
-    FF_CODEC_RECEIVE_PACKET_CB(&ff_vaapi_encode_receive_packet),
+    FF_CODEC_RECEIVE_PACKET_CB(&ff_hw_base_encode_receive_packet),
     .close          = &ff_vaapi_encode_close,
     .p.priv_class   = &vaapi_encode_vp8_class,
     .p.capabilities = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_HARDWARE |
