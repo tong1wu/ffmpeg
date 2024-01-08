@@ -35,7 +35,7 @@ version <next>:
 - AEA muxer
 - ffmpeg CLI loopback decoders
 - Support PacketTypeMetadata of PacketType in enhanced flv format
-
+- D3D12VA HEVC encoder
 
 version 6.1:
 - libaribcaption decoder
